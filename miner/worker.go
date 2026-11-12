@@ -304,7 +304,7 @@ func (miner *Miner) prepareWork(genParams *generateParams, witness bool) (*envir
 	// Sanity check the timestamp correctness, recap the timestamp
 	// to parent+1 if the mutation is allowed.
 	timestamp := genParams.timestamp
-	if parent.Time >= timestamp {
+	if !miner.chainConfig.ValidChildTimestamp(parent.Time, timestamp) {
 		if genParams.forceTime {
 			return nil, fmt.Errorf("invalid timestamp, parent %d given %d", parent.Time, timestamp)
 		}
@@ -836,7 +836,7 @@ func (miner *Miner) validateParams(genParams *generateParams) (time.Duration, er
 
 	// Sanity check the timestamp correctness
 	blockTime := int64(genParams.timestamp) - int64(parent.Time)
-	if blockTime <= 0 && genParams.forceTime {
+	if !miner.chainConfig.ValidChildTimestamp(parent.Time, genParams.timestamp) && genParams.forceTime {
 		return 0, fmt.Errorf("invalid timestamp, parent %d given %d", parent.Time, genParams.timestamp)
 	}
 
