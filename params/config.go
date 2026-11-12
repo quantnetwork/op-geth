@@ -511,6 +511,19 @@ type OptimismConfig struct {
 	EIP1559Elasticity        uint64  `json:"eip1559Elasticity"`
 	EIP1559Denominator       uint64  `json:"eip1559Denominator"`
 	EIP1559DenominatorCanyon *uint64 `json:"eip1559DenominatorCanyon,omitempty"`
+	// AllowEqualTimestamps lets a block carry its parent's timestamp (sub-second
+	// L2 blocks: k blocks share one whole-second timestamp; the rollup node
+	// enforces the schedule). Off: a block must be later than its parent.
+	AllowEqualTimestamps bool `json:"allowEqualTimestamps,omitempty"`
+}
+
+// ValidChildTimestamp reports whether a block stamped child may follow a parent
+// stamped parent: strictly later, or equal when Optimism.AllowEqualTimestamps is set.
+func (c *ChainConfig) ValidChildTimestamp(parent, child uint64) bool {
+	if c != nil && c.Optimism != nil && c.Optimism.AllowEqualTimestamps {
+		return child >= parent
+	}
+	return child > parent
 }
 
 // String implements the stringer interface, returning the optimism fee config details.
