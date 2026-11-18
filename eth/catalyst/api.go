@@ -890,7 +890,7 @@ func (api *ConsensusAPI) newPayload(ctx context.Context, params engine.Executabl
 	if parent == nil {
 		return api.delayPayloadImport(block), nil
 	}
-	if block.Time() <= parent.Time() {
+	if !api.eth.BlockChain().Config().ValidChildTimestamp(parent.Time(), block.Time()) {
 		log.Warn("Invalid timestamp", "parent", parent.Time(), "block", block.Time())
 		return api.invalid(errors.New("invalid timestamp"), parent.Header()), nil
 	}
