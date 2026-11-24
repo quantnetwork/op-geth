@@ -502,6 +502,14 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, triedb *triedb.Database, g
 		return nil, common.Hash{}, nil, err
 	}
 
+	// OP-Stack diff: allowEqualTimestamps is outside the genesis hash and the fork
+	// schedule, so CheckCompatible below cannot see a change to it. Refuse the
+	// change outright once the chain is past genesis (a compat error would only
+	// rewind the chain, or be dropped, and then store the new value).
+	if err := storedCfg.CheckAllowEqualTimestampsCompatible(newCfg, head.Number.Uint64()); err != nil {
+		return nil, common.Hash{}, nil, err
+	}
+
 	var genesisTimestamp *uint64
 	if genesis != nil {
 		genesisTimestamp = &genesis.Timestamp
