@@ -42,8 +42,11 @@ func equalTimestampGenesis(allow bool) *core.Genesis {
 // buildOn runs the sequencer's Engine API round trip for one block stamped ts
 // on parent: forkchoiceUpdated with attributes, getPayload, newPayload, and
 // forkchoiceUpdated to make it the head. It returns the first error or invalid
-// status it meets.
-func buildOn(t *testing.T, api *ConsensusAPI, parent common.Hash, ts uint64) (common.Hash, error) {
+// status it meets. noTxPool picks the miner path: true builds the block from the
+// given transactions only (prepareWork's timestamp check); false is the
+// sequencer's normal path, which first runs validateParams' timestamp check and
+// then fills the block in the background builder.
+func buildOn(t *testing.T, api *ConsensusAPI, parent common.Hash, ts uint64, noTxPool bool) (common.Hash, error) {
 	t.Helper()
 	dep, err := types.NewTx(&types.DepositTx{}).MarshalBinary()
 	require.NoError(t, err)
@@ -53,7 +56,7 @@ func buildOn(t *testing.T, api *ConsensusAPI, parent common.Hash, ts uint64) (co
 		Withdrawals:   []*types.Withdrawal{},
 		BeaconRoot:    &common.Hash{},
 		Transactions:  [][]byte{dep},
-		NoTxPool:      true,
+		NoTxPool:      noTxPool,
 		GasLimit:      &gasLimit,
 		EIP1559Params: eip1559.EncodeHolocene1559Params(250, 6),
 	}
@@ -94,34 +97,44 @@ func startEqualTimestampNode(t *testing.T, allow bool) *ConsensusAPI {
 
 // TestEqualTimestampEngineRoundTrip: with allowEqualTimestamps the sequencer
 // round trip builds and imports a block stamped like its parent; without it the
-// same request is refused, as before.
+// same request is refused, as before. Both miner paths are covered: with
+// NoTxPool the timestamp is checked in prepareWork, without it (the normal
+// sequencer path) first in validateParams.
 func TestEqualTimestampEngineRoundTrip(t *testing.T) {
-	t.Run("allowed", func(t *testing.T) {
-		api := startEqualTimestampNode(t, true)
-		head := api.eth.BlockChain().CurrentBlock()
-		h1, err := buildOn(t, api, head.Hash(), head.Time+1)
-		require.NoError(t, err)
-		h2, err := buildOn(t, api, h1, head.Time+1) // same second as its parent
-		require.NoError(t, err)
-		h3, err := buildOn(t, api, h2, head.Time+1)
-		require.NoError(t, err)
-		cur := api.eth.BlockChain().CurrentBlock()
-		require.Equal(t, h3, cur.Hash())
-		require.Equal(t, uint64(3), cur.Number.Uint64())
-		require.Equal(t, head.Time+1, cur.Time)
-		// Going back in time is still refused.
-		_, err = buildOn(t, api, h3, head.Time)
-		require.Error(t, err)
-	})
-	t.Run("default", func(t *testing.T) {
-		api := startEqualTimestampNode(t, false)
-		head := api.eth.BlockChain().CurrentBlock()
-		h1, err := buildOn(t, api, head.Hash(), head.Time+1)
-		require.NoError(t, err)
-		_, err = buildOn(t, api, h1, head.Time+1)
-		require.Error(t, err)
-		require.Equal(t, uint64(1), api.eth.BlockChain().CurrentBlock().Number.Uint64())
-	})
+	for _, noTxPool := range []bool{true, false} {
+		build := func(t *testing.T, api *ConsensusAPI, parent common.Hash, ts uint64) (common.Hash, error) {
+			return buildOn(t, api, parent, ts, noTxPool)
+		}
+		t.Run(fmt.Sprintf("noTxPool=%v", noTxPool), func(t *testing.T) {
+			t.Run("allowed", func(t *testing.T) {
+				api := startEqualTimestampNode(t, true)
+				head := api.eth.BlockChain().CurrentBlock()
+				h1, err := build(t, api, head.Hash(), head.Time+1)
+				require.NoError(t, err)
+				h2, err := build(t, api, h1, head.Time+1) // same second as its parent
+				require.NoError(t, err)
+				h3, err := build(t, api, h2, head.Time+1)
+				require.NoError(t, err)
+				cur := api.eth.BlockChain().CurrentBlock()
+				require.Equal(t, h3, cur.Hash())
+				require.Equal(t, uint64(3), cur.Number.Uint64())
+				require.Equal(t, head.Time+1, cur.Time)
+				// Going back in time is still refused.
+				_, err = build(t, api, h3, head.Time)
+				require.Error(t, err)
+				require.Equal(t, h3, api.eth.BlockChain().CurrentBlock().Hash())
+			})
+			t.Run("default", func(t *testing.T) {
+				api := startEqualTimestampNode(t, false)
+				head := api.eth.BlockChain().CurrentBlock()
+				h1, err := build(t, api, head.Hash(), head.Time+1)
+				require.NoError(t, err)
+				_, err = build(t, api, h1, head.Time+1)
+				require.Error(t, err)
+				require.Equal(t, uint64(1), api.eth.BlockChain().CurrentBlock().Number.Uint64())
+			})
+		})
+	}
 }
 
 // TestEqualTimestampNewPayloadOnly: a verifier (newPayload only) imports a
@@ -130,9 +143,9 @@ func TestEqualTimestampEngineRoundTrip(t *testing.T) {
 func TestEqualTimestampNewPayloadOnly(t *testing.T) {
 	seq := startEqualTimestampNode(t, true)
 	head := seq.eth.BlockChain().CurrentBlock()
-	h1, err := buildOn(t, seq, head.Hash(), head.Time+1)
+	h1, err := buildOn(t, seq, head.Hash(), head.Time+1, true)
 	require.NoError(t, err)
-	h2, err := buildOn(t, seq, h1, head.Time+1)
+	h2, err := buildOn(t, seq, h1, head.Time+1, true)
 	require.NoError(t, err)
 	b1 := seq.eth.BlockChain().GetBlockByHash(h1)
 	b2 := seq.eth.BlockChain().GetBlockByHash(h2)
