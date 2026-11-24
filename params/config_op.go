@@ -1,6 +1,7 @@
 package params
 
 import (
+	"errors"
 	"fmt"
 	"math/big"
 )
@@ -83,6 +84,44 @@ type OptimismConfig struct {
 	EIP1559Elasticity        uint64  `json:"eip1559Elasticity"`
 	EIP1559Denominator       uint64  `json:"eip1559Denominator"`
 	EIP1559DenominatorCanyon *uint64 `json:"eip1559DenominatorCanyon,omitempty"`
+	// AllowEqualTimestamps lets a block carry its parent's timestamp (sub-second
+	// L2 blocks: k blocks share one whole-second timestamp; the rollup node
+	// enforces the schedule). Off: a block must be later than its parent.
+	AllowEqualTimestamps bool `json:"allowEqualTimestamps,omitempty"`
+}
+
+// ValidChildTimestamp reports whether a block stamped child may follow a parent
+// stamped parent: strictly later, or equal when Optimism.AllowEqualTimestamps is set.
+func (c *ChainConfig) ValidChildTimestamp(parent, child uint64) bool {
+	if c.allowEqualTimestamps() {
+		return child >= parent
+	}
+	return child > parent
+}
+
+func (c *ChainConfig) allowEqualTimestamps() bool {
+	return c != nil && c.Optimism != nil && c.Optimism.AllowEqualTimestamps
+}
+
+// ErrAllowEqualTimestampsChanged is returned when a chain with blocks past
+// genesis is opened with a different Optimism.AllowEqualTimestamps value.
+var ErrAllowEqualTimestampsChanged = errors.New("optimism.allowEqualTimestamps cannot change once the chain is past genesis")
+
+// CheckAllowEqualTimestampsCompatible refuses a change of
+// Optimism.AllowEqualTimestamps from the stored config c to newcfg once the
+// chain head is past genesis. The flag is in neither the genesis hash nor the
+// fork schedule, so CheckCompatible cannot see it, and it applies to every
+// block: switched off, a chain that already holds equal-timestamp blocks would
+// no longer validate; switched on mid-chain, the node would accept blocks its
+// peers refuse. A nil config or nil Optimism counts as off.
+func (c *ChainConfig) CheckAllowEqualTimestampsCompatible(newcfg *ChainConfig, headNumber uint64) error {
+	if headNumber == 0 {
+		return nil
+	}
+	if stored, next := c.allowEqualTimestamps(), newcfg.allowEqualTimestamps(); stored != next {
+		return fmt.Errorf("%w (stored %v, new %v, head block %d)", ErrAllowEqualTimestampsChanged, stored, next, headNumber)
+	}
+	return nil
 }
 
 // String implements the stringer interface, returning the optimism fee config details.
